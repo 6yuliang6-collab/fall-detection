@@ -1,0 +1,7 @@
+# 跌倒检测数据集配置（YOLOv5）
+# 类别顺序必须与代码保持一致：0 = normal（正常），1 = down（跌倒）
+# 注意：YOLOv5 会把相对路径解析到 yolov5/ 目录下，所以这里必须用绝对路径
+train: C:/Users/Lenovo/fall-detection/dataset/images/train
+val: C:/Users/Lenovo/fall-detection/dataset/images/val
+nc: 2
+names: ['normal', 'down']

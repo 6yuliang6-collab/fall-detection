@@ -1,0 +1,10 @@
+cd /d C:\Users\Lenovo\fall-detection
+venv\Scripts\python.exe system\cloud_backend.py
+
+
+cd /d C:\Users\Lenovo\fall-detection
+venv\Scripts\python.exe system\edge_detector.py --source 0
+
+
+
+http://127.0.0.1:5000

@@ -1,0 +1,8 @@
+# 跌倒检测最终数据集（Roboflow 公开数据 + 原数据，2 类）
+# 类别顺序：0 = normal（正常），1 = down（跌倒/躺倒）
+# 用绝对路径避免 YOLOv5 相对路径解析问题
+train: C:/Users/Lenovo/fall-detection/dataset_final/images/train
+val: C:/Users/Lenovo/fall-detection/dataset_final/images/val
+test: C:/Users/Lenovo/fall-detection/dataset_final/images/test
+nc: 2
+names: ['normal', 'down']

@@ -1,198 +1,114 @@
-# 基于 YOLOv5 的跌倒检测器
+# 跌倒检测系统（视觉 + IMU 双模态 + 云端后端）
 
-这是一个基于 **YOLOv5** 的跌倒检测器项目。该项目利用深度学习模型实现对视频或图片中的跌倒事件进行实时检测，支持 PyTorch 和 ONNX 格式的模型加载
+基于 YOLOv5（视觉）和 IMU（随机森林/1D-CNN）的多模态跌倒检测系统，通过 MQTT 把边缘端检测结果发送到**云服务器**，云端做融合判定、存储、警报，并通过 Web 仪表盘展示。
 
-## 目录
+## 系统架构（云服务器参与过程）
 
-- [基于 YOLOv5 的跌倒检测器](#基于-yolov5-的跌倒检测器)
-  - [目录](#目录)
-  - [主要组成](#主要组成)
-    - [1. YOLOv5 仓库](#1-yolov5-仓库)
-    - [2. 本地推理（inferlocal）](#2-本地推理inferlocal)
-    - [3. 远程推理（inferemote）](#3-远程推理inferemote)
-    - [4. 模型参数 (modelweight)](#4-模型参数-modelweight)
-    - [5. 远程推理依赖（requirements）](#5-远程推理依赖requirements)
-  - [安装指南](#安装指南)
-  - [使用指南](#使用指南)
-    - [命令行用法](#命令行用法)
-      - [命令行参数说明](#命令行参数说明)
-      - [示例用法](#示例用法)
-    - [API 使用](#api-使用)
-      - [示例代码](#示例代码)
-    - [远程推理](#远程推理)
-      - [示例用法](#示例用法-1)
-  
-## 主要组成
-### 1. YOLOv5 仓库
-
-本项目依赖于 [YOLOv5](https://github.com/ultralytics/yolov5) 仓库，用于模型的训练和推理。
-
-### 2. 本地推理（inferlocal）
-
-本地推理包含了 `FallDownDetectYolo` 模块，支持命令行运行的`run.py` 脚本以及 `run_api.py` 的api调用示例。
-
-### 3. 远程推理（inferemote）
-
-远程推理包含了 `fall.py` 模块和 `test.py` 脚本，可以在本地进行端口转发，并在Atlas200DK开发板上挂载om模型后实行远程推理。
-
-### 4. 模型参数 (modelweight)
-
-包含了训练好的`pt`、`onnx`以及`om`文件。
-
-### 5. 远程推理依赖（requirements）
-
-包含远程推理需要的 `inferemote` 软件包。
-
-## 安装指南
-
-1. **克隆项目仓库**
-
-    ```bash
-    git clone https://github.com/SowingG2333/fall-detection.git
-    ```
-
-2. **创建虚拟环境（可选）**
-
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-    
-3. **安装YOLOv5依赖**
-   
-    ```bash
-    git clone https://github.com/ultralytics/yolov5.git
-    cd yolov5
-    pip install -r requirements.txt
-    ```
-
-4. **安装本地推理依赖**
-
-    ```bash
-    pip install torch torchvision onnxruntime opencv-python numpy pandas argparse
-    ```
-
-5. **安装远程推理依赖（基于Atlas200DK开发板，可选）**
-
-    ```bash
-    # windows安装
-    pip install requirements/inferemote-2.0.2-py39-none-win_amd64
-    # macos安装
-    pip install requirements/inferemote-2.0.2-py39-none-macosx_10_15_universal2
-    ```
-
-## 使用指南
-
-### 命令行用法
-
-本项目提供了命令行接口，支持图像和视频的推理。以下是详细的命令行参数说明及使用示例。
-
-#### 命令行参数说明
-
-- `--yolov5_path`：YOLOv5 的本地路径。
-- `--weight_path`：模型权重文件的路径（`.pt` 或 `.onnx`）。
-- `--image_path`：待检测的图像路径。
-- `--video_path`：待检测的视频路径。
-- `--model_type`：模型类型，选择 `pt` 或 `onnx`。
-- `--input_type`：输入类型，选择 `image` 或 `video`。
-- `--save`：是否保存检测结果。
-- `--save_path`：检测结果的保存路径（图片或视频）。
-- `--fps`：保存视频的帧率（仅在视频模式下有效）。
-
-#### 示例用法
-
-1. **图像推理（默认不保存结果）**
-
-    ```bash
-    python run.py --yolov5_path /path/to/yolov5 \
-                  --weight_path /path/to/model.pt \
-                  --image_path /path/to/image.jpg \
-                  --model_type pt \
-                  --input_type image
-    ```
-
-2. **图像推理并保存检测结果**
-
-    ```bash
-    python run.py --yolov5_path /path/to/yolov5 \
-                  --weight_path /path/to/model.pt \
-                  --image_path /path/to/image.jpg \
-                  --model_type pt \
-                  --input_type image \
-                  --save \
-                  --save_path /path/to/output.jpg
-    ```
-
-3. **视频推理（默认不保存结果）**
-
-    ```bash
-    python run.py --yolov5_path /path/to/yolov5 \
-                  --weight_path /path/to/model.onnx \
-                  --video_path /path/to/video.mp4 \
-                  --model_type onnx \
-                  --input_type video
-    ```
-
-4. **视频推理并保存检测结果**
-
-    ```bash
-    python run.py --yolov5_path /path/to/yolov5 \
-                  --weight_path /path/to/model.onnx \
-                  --video_path /path/to/video.mp4 \
-                  --model_type onnx \
-                  --input_type video \
-                  --save \
-                  --save_path /path/to/output_video.avi \
-                  --fps 30
-    ```
-
-5. **实时摄像头推理（不保存结果）**
-
-    ```bash
-    python run.py --yolov5_path /path/to/yolov5 \
-                  --weight_path /path/to/model.onnx \
-                  --model_type onnx \
-                  --input_type video
-    ```
-
-    *如果不指定 `--video_path`，脚本将尝试打开默认摄像头进行实时推理。*
-
-### API 使用
-
-除了命令行接口，您还可以在 Python 脚本中直接调用 `FallDownDetectYolo` 类进行跌倒检测。以下是如何在代码中使用该模块的示例。
-
-#### 示例代码
-
-```python
-from fallDownDetectYolo import FallDownDetectYolo
-
-# 初始化检测器
-detector = FallDownDetectYolo(
-    yolov5_path='/path/to/yolov5',
-    weight_path='/path/to/model.pt',
-    image_path='/path/to/image.jpg',
-    video_path=None,  # 如果不使用视频
-    pt_or_onnx='pt'
-)
-
-# 对单张图片进行推理
-detector.img_inference(save=True, save_path='/path/to/output.jpg')
-
-# 对视频进行推理
-detector.video_inference(save=True, save_path='/path/to/output_video.avi', fps=30)
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  边缘端（你电脑 /                                           │
+│                                                                     │
+│  [视觉] 摄像头 ──► YOLOv5(fall_v5) ──► 检测 normal/down             │
+│                                            │                        │
+│  [IMU]  MPU6050 ──► 随机森林/1D-CNN ──► 跌倒概率                     │
+│                                            │                        │
+└────────────────────────────────────────────┼────────────────────────┘
+                                             │ MQTT 发布
+                                             ▼
+                    ┌────────────────────────────────┐
+                    │      云服务器 (阿里云 8.219.124.194) │
+                    │                                │
+                    │  mosquitto (MQTT broker :1883)  │ ◄── 接收边缘数据
+                    │        │                       │
+                    │  Flask 后端 (:5000)            │ ◄── 订阅 MQTT
+                    │    ├─ 多模态融合 / 纯视觉判定   │
+                    │    ├─ SQLite 数据库 (存事件/警报)│
+                    │    ├─ 去抖警报规则              │
+                    │    └─ Web 仪表盘                │
+                    └───────────────┬────────────────┘
+                                    │ HTTP
+                                    ▼
+                     浏览器 http://8.219.124.194:5000  ◄── 用户查看
 ```
 
-### 远程推理
-#### 示例用法
-1. 利用ssh工具与远程开发板进行端口转发（端口可更改）
+**云服务器参与的关键点**：边缘端只做检测，**不存储、不判警报**；所有事件通过 MQTT 发到云端，由云端完成存储、融合判定、去抖报警，用户通过公网 URL 访问仪表盘查看结果。
+
+## 环境依赖
+
+完整环境（训练 + 推理）见 [requirements.txt](requirements.txt)。核心：
+- Python 3.11
+- torch 2.14.0+cu126、opencv-python 5.0
+- flask、paho-mqtt、scikit-learn
+
+云服务器端只需要（见 [deploy/requirements.txt](deploy/requirements.txt)）：
+- flask、paho-mqtt（**不需要 torch/GPU**，模型推理在边缘端）
+
+## 可重现步骤
+
+### 1. 安装依赖
 ```bash
-ssh -L 9023:localhost:9666 username@ip -p 9023
+pip install -r requirements.txt
 ```
-2. 利用airloader工具进行om模型挂载
+
+### 2. 复现训练（视觉模型）
 ```bash
-airloader -m /path/to/model.om -p 9666
+# 数据集：Roboflow fall-awbxa（下载见 tools/fetch_roboflow.py）+ 自采摄像头数据
+# 切分 + 合并：tools/build_final_dataset.py、tools/merge_capture.py
+python yolov5/train.py --img 640 --batch 16 --epochs 150 --data data_final.yaml \
+  --weights yolov5s.pt --device 0 --hyp yolov5/data/hyps/hyp.fall3.yaml --cos-lr
 ```
-3. 本地运行 `test.py` 脚本
+
+### 3. 复现 IMU 模型（RF vs 1D-CNN）
 ```bash
-python test.py -r localhost -p 9023 -w 5    
+python tools/imu_rf_cnn.py   # 训练并输出 P/R/F1
+python tools/imu_viz.py      # 生成对比图
 ```
+
+### 4. 本地运行（边缘 + 云端都在本机）
+```bash
+# 终端1：云端后端
+python system/cloud_backend.py
+# 终端2：摄像头检测
+python system/edge_detector.py --source 0
+# 浏览器打开 http://127.0.0.1:5000
+```
+
+### 5. 云服务器部署（见 deploy/README.md 完整步骤）
+```bash
+# 上传代码 + 跑部署脚本
+scp -r system deploy admin@<公网IP>:/home/admin/fall-detection/
+ssh admin@<公网IP> "bash /home/admin/fall-detection/deploy/setup.sh"
+```
+
+## 演示工作流（1-2 分钟演示脚本）
+
+1. **展示云服务器已部署**：浏览器打开 `http://8.219.124.194:5000`（公网仪表盘）
+2. **启动边缘检测**：`python system/edge_detector.py --source 0 --broker 8.219.124.194`
+3. **对着摄像头做动作**：站立 → 坐下/躺下 → 站立
+4. 仪表盘实时刷新事件，连续跌倒触发警报
+5. **证明是云端**：`curl http://8.219.124.194:5000/api/stats` 返回 JSON；服务器日志显示请求；数据库有记录
+
+## 评估结果（保留测试集）
+
+| 模态 / 模型 | 类别 | P | R | F1 | mAP50 |
+|---|---|---|---|---|---|
+| 视觉 YOLOv5 (fall_v5) | down | 0.966 | 0.956 | 0.961 | 0.989 |
+| IMU 随机森林 | fall | 0.994 | 0.993 | 0.994 | — |
+| IMU 1D-CNN | fall | 0.977 | 0.972 | 0.975 | — |
+
+## 目录结构
+
+```
+system/        边缘检测(edge_detector.py) + 云端后端(cloud_backend.py) + 融合(fusion.py) + 仪表盘
+deploy/        云服务器部署脚本 + 文档
+tools/         数据下载、切分、标注、误报分析、IMU 模型训练脚本
+yolov5/        YOLOv5 框架 + 训练
+dataset_final/ 最终训练数据（Roboflow + 自采）
+runs/train/    训练结果（fall_v5 等）
+```
+
+## 数据与模型来源（学术诚信引用）
+
+- 视觉数据：Roboflow [fall-awbxa](https://universe.roboflow.com/go-ygbsj/fall-awbxa)（CC BY 4.0）+ 自采摄像头数据
+- IMU 数据：SisFall（Sucerquia et al., 2017）
+- 基线模型：YOLOv5（Ultralytics, AGPL-3.0）、scikit-learn RandomForest

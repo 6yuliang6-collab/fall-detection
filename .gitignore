@@ -1,0 +1,24 @@
+# 虚拟环境
+venv/
+
+# 推理结果
+result_*.jpg
+result_*.avi
+test_input.avi
+
+# 大数据/模型文件（如需提交模型权重，单独放 release 或用 git-lfs）
+dataset_final/
+dataset_merged/
+fall-1/
+_imu/
+capture/
+runs/
+*.db
+*.pt
+*.onnx
+*.om
+_demo_out/
+
+# Python 缓存
+__pycache__/
+*.pyc

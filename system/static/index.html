@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跌倒检测监控面板</title>
+  <style>
+    :root { --bg:#0f172a; --card:#1e293b; --ok:#22c55e; --warn:#ef4444; --muted:#94a3b8; --text:#e2e8f0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; padding: 24px; }
+    h1 { font-size: 20px; margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .card { background: var(--card); border-radius: 12px; padding: 16px; }
+    .card .label { color: var(--muted); font-size: 13px; }
+    .card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .status { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 12px; background: var(--card); margin-bottom: 20px; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .dot.down { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+    .dot.normal { background: var(--ok); }
+    .status .big { font-size: 18px; font-weight: 700; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #334155; }
+    th { color: var(--muted); font-weight: 600; }
+    .tag { padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .tag.down { background: #7f1d1d; color: #fecaca; }
+    .tag.normal { background: #14532d; color: #bbf7d0; }
+    .tag.none { background: #334155; color: var(--muted); }
+    .alert-item { padding: 10px 12px; border-left: 3px solid var(--warn); background: #2a1a1a; border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
+    .alert-item .t { color: var(--muted); font-size: 12px; }
+    .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  </style>
+</head>
+<body>
+  <h1>🛡️ 跌倒检测监控面板</h1>
+
+  <div class="status" id="status">
+    <div class="dot" id="statusDot"></div>
+    <div>
+      <div class="big" id="statusText">等待数据…</div>
+      <div style="color:var(--muted);font-size:13px" id="statusSub">边缘端尚未发布事件</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">检测事件总数</div><div class="value" id="statTotal">0</div></div>
+    <div class="card"><div class="label">跌倒 (down)</div><div class="value" style="color:var(--warn)" id="statDown">0</div></div>
+    <div class="card"><div class="label">正常 (normal)</div><div class="value" style="color:var(--ok)" id="statNormal">0</div></div>
+    <div class="card"><div class="label">🚨 警报数</div><div class="value" id="statAlerts">0</div></div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <div class="label" style="margin-bottom:12px">🚨 最近警报</div>
+      <div id="alerts"><div class="empty">暂无警报</div></div>
+    </div>
+    <div class="card">
+      <div class="label" style="margin-bottom:12px">📋 最近事件</div>
+      <table>
+        <thead><tr><th>时间</th><th>类别</th><th>置信度</th><th>设备</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // 把云端存的 UTC 时间转成浏览器本地时间显示
+    function fmtTime(ts) {
+      if (!ts) return '';
+      return new Date(ts).toLocaleString('zh-CN', { hour12: false });
+    }
+    async function refresh() {
+      try {
+        const [stats, latest, alerts, events] = await Promise.all([
+          fetch('/api/stats').then(r => r.json()),
+          fetch('/api/latest').then(r => r.json()),
+          fetch('/api/alerts?limit=10').then(r => r.json()),
+          fetch('/api/events?limit=20').then(r => r.json()),
+        ]);
+
+        // 统计卡片
+        document.getElementById('statTotal').textContent = stats.total_events ?? 0;
+        document.getElementById('statDown').textContent = stats.down ?? 0;
+        document.getElementById('statNormal').textContent = stats.normal ?? 0;
+        document.getElementById('statAlerts').textContent = stats.alerts ?? 0;
+
+        // 实时状态
+        const dot = document.getElementById('statusDot');
+        const txt = document.getElementById('statusText');
+        const sub = document.getElementById('statusSub');
+        if (latest && latest.class_name) {
+          const cls = latest.class_name;
+          dot.className = 'dot ' + cls;
+          txt.textContent = (cls === 'down' ? '⚠️ 检测到跌倒' : cls === 'normal' ? '✅ 状态正常' : '👀 未检测到目标');
+          sub.textContent = fmtTime(latest.ts) + ' · 置信度 ' + (latest.conf ?? 0) + ' · ' + (latest.device || '');
+        }
+
+        // 警报
+        const alertsBox = document.getElementById('alerts');
+        alertsBox.innerHTML = alerts.length ? alerts.map(a =>
+          `<div class="alert-item"><div>🚨 ${a.reason}</div><div class="t">${fmtTime(a.ts)} · ${a.device}</div></div>`
+        ).join('') : '<div class="empty">暂无警报</div>';
+
+        // 事件表
+        document.getElementById('events').innerHTML = events.map(e =>
+          `<tr><td>${fmtTime(e.ts)}</td>` +
+          `<td><span class="tag ${e.class_name}">${e.class_name}</span></td>` +
+          `<td>${e.conf}</td><td>${e.device}</td></tr>`
+        ).join('') || '<tr><td colspan="4" class="empty">暂无事件</td></tr>';
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    refresh();
+    setInterval(refresh, 1500);
+  </script>
+</body>
+</html>
