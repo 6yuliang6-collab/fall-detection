@@ -32,10 +32,13 @@ ECS 控制台 → 安全组 → 配置规则 → 添加入方向规则：
 
 ## 第 3 步：上传代码到服务器
 
-只需要这三个东西（都是纯 Python，服务器上**不用装 torch/GPU**）：
-- `system/cloud_backend.py`
-- `system/config.py`
-- `system/static/`（整个文件夹）
+上传整个 `system/` 和 `deploy/` 目录（纯 Python，服务器上**不用装 torch/GPU**）。
+`system/` 里除了 Flask 后端，还包含 **IMU 云端推理** 所需的文件：
+
+- `system/cloud_backend.py`、`system/config.py`、`system/static/`
+- `system/imu_features.py`      —— 原始窗口 → 67 维特征
+- `system/imu_rf_inference.py`  —— 加载随机森林并推理
+- `system/imu_rf.joblib` / `imu_scaler.joblib` / `imu_feature_names.joblib` —— 模型文件
 
 **方式 A：scp（Windows 用 Git Bash / PowerShell）**
 ```bash

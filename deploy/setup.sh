@@ -9,7 +9,7 @@ sudo apt-get update -y
 sudo apt-get install -y mosquitto mosquitto-clients python3 python3-pip
 
 echo "=== [2/4] 安装 Python 依赖 ==="
-pip3 install --user flask paho-mqtt
+pip3 install --user -r ~/fall-detection/deploy/requirements.txt
 
 echo "=== [3/4] 配置 mosquitto 监听所有网卡 + 允许匿名 ==="
 sudo tee /etc/mosquitto/conf.d/fall.conf > /dev/null <<'EOF'

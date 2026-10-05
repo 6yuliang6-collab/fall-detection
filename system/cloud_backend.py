@@ -58,6 +58,10 @@ def init_db():
                 reason TEXT
             );
         """)
+        # 迁移：兼容旧库（旧库的 events 表没有 modality 列时补上）
+        cols = [r[1] for r in c.execute("PRAGMA table_info(events)").fetchall()]
+        if "modality" not in cols:
+            c.execute("ALTER TABLE events ADD COLUMN modality TEXT")
         c.commit()
         c.close()
 
@@ -137,28 +141,31 @@ def insert_alert(device, reason):
 # ---------- MQTT 订阅 ----------
 def on_connect(client, userdata, flags, rc):
     client.subscribe(config.MQTT_TOPIC_EVENTS)
-    client.subscribe(config.MQTT_TOPIC_IMU)
-    print(f"[云端] 已订阅: {config.MQTT_TOPIC_EVENTS} (视觉) + {config.MQTT_TOPIC_IMU} (IMU)")
+    if config.IMU_INFERENCE_ON_CLOUD:
+        client.subscribe(config.MQTT_TOPIC_IMU_RAW)
+        print(f"[云端] 已订阅: {config.MQTT_TOPIC_EVENTS} (视觉) + "
+              f"{config.MQTT_TOPIC_IMU_RAW} (IMU原始窗口, 云端RF推理)")
+    else:
+        client.subscribe(config.MQTT_TOPIC_IMU)
+        print(f"[云端] 已订阅: {config.MQTT_TOPIC_EVENTS} (视觉) + "
+              f"{config.MQTT_TOPIC_IMU} (IMU)")
 
 
-def on_message(client, userdata, msg):
-    try:
-        data = json.loads(msg.payload.decode("utf-8"))
-    except Exception as e:
-        print("[云端] 消息解析失败:", e)
-        return
+def run_imu_inference(device, window):
+    """云端 IMU 推理：原始窗口 -> 特征 -> 随机森林 -> (class_name, conf)。"""
+    from imu_rf_inference import predict
+    cls, p_fall = predict(window)
+    class_name = "down" if cls == 1 else "normal"
+    conf = p_fall if cls == 1 else (1.0 - p_fall)  # 预测类别的置信度
+    print(f"[云端] [IMU推理] 设备 {device} -> {class_name} (跌倒概率 {p_fall:.4f})")
+    return class_name, conf
 
-    modality = "vision" if msg.topic == config.MQTT_TOPIC_EVENTS else "imu"
-    device = data.get("device", "unknown")
-    class_name = data.get("class_name", "none")
-    conf = float(data.get("conf", data.get("prob", 0.0)))
-    dets = data.get("detections", [])
 
-    # 存储事件（带模态）
+def handle_event(modality, device, class_name, conf, dets):
+    """统一处理一个事件：落库 + 报警判定（纯视觉 或 多模态融合）。"""
     insert_event(modality, device, class_name, conf,
                  dets[0].get("box") if dets else [])
 
-    # 报警判定：纯视觉 或 多模态融合（由 config.FUSION_ENABLED 控制）
     if config.FUSION_ENABLED:
         # 更新该模态的最新结果，供融合使用
         cls_int = _CLS.get(class_name, 0)
@@ -178,10 +185,51 @@ def on_message(client, userdata, msg):
             print(f"[云端] [警报] 触发警报！设备 {device} 检测到跌倒")
 
 
+def on_message(client, userdata, msg):
+    try:
+        data = json.loads(msg.payload.decode("utf-8"))
+    except Exception as e:
+        print("[云端] 消息解析失败:", e)
+        return
+
+    # ---- 主题路由 ----
+    if msg.topic == config.MQTT_TOPIC_EVENTS:
+        # 视觉：边缘端已检测好，直接带 class_name/conf
+        modality = "vision"
+        device = data.get("device", "unknown")
+        class_name = data.get("class_name", "none")
+        conf = float(data.get("conf", 0.0))
+        dets = data.get("detections", [])
+    elif msg.topic == config.MQTT_TOPIC_IMU_RAW:
+        # IMU 原始加速度窗口：云端提取特征 + 跑随机森林推理
+        try:
+            device = data.get("device", "unknown")
+            class_name, conf = run_imu_inference(device, data.get("window", []))
+        except Exception as e:
+            print(f"[云端] [IMU推理] 推理失败: {e}")
+            return
+        modality = "imu"
+        dets = []
+    else:
+        # IMU 边缘端已判好的结论（IMU_INFERENCE_ON_CLOUD=False 时）
+        modality = "imu"
+        device = data.get("device", "unknown")
+        class_name = data.get("class_name", "none")
+        conf = float(data.get("conf", data.get("prob", 0.0)))
+        dets = []
+
+    handle_event(modality, device, class_name, conf, dets)
+
+
 # ---------- REST API ----------
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.route("/phone_imu")
+def phone_imu():
+    return send_from_directory(STATIC_DIR, "phone_imu.html")
 
 
 @app.route("/api/stats")
@@ -230,6 +278,33 @@ def api_alerts():
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/api/imu/raw", methods=["POST"])
+def api_imu_raw():
+    """手机/HTTP 客户端直接 POST 原始加速度窗口，云端跑 RF 推理。
+    请求体: {"device":"phone01", "fs":50, "window":[[ax,ay,az], ...]}
+    """
+    data = request.get_json(silent=True) or {}
+    device = data.get("device", "phone01")
+    window = data.get("window", [])
+    if not window:
+        return jsonify({"error": "missing window"}), 400
+    try:
+        class_name, conf = run_imu_inference(device, window)
+    except Exception as e:
+        return jsonify({"error": f"inference failed: {e}"}), 500
+    handle_event("imu", device, class_name, conf, [])
+    return jsonify({"device": device, "class_name": class_name, "conf": round(conf, 4)})
+
+
+@app.after_request
+def add_cors(resp):
+    # 允许手机网页从任意来源调用（同一域名其实不需要，加了更稳）
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
+
 def start_mqtt():
     client = mqtt.Client(client_id=f"cloud-{os.getpid()}", protocol=mqtt.MQTTv311)
     client.on_connect = on_connect
@@ -245,5 +320,13 @@ def start_mqtt():
 if __name__ == "__main__":
     init_db()
     start_mqtt()
-    print(f"[云端] 仪表盘已启动: http://{config.WEB_HOST}:{config.WEB_PORT}")
-    app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False, use_reloader=False)
+
+    # HTTPS（自签名证书，iOS 手机传感器需要安全上下文）；证书缺失则退回 HTTP
+    ssl_context = None
+    scheme = "http"
+    if config.SSL_ENABLED and os.path.exists(config.SSL_CERT) and os.path.exists(config.SSL_KEY):
+        ssl_context = (config.SSL_CERT, config.SSL_KEY)
+        scheme = "https"
+    print(f"[云端] 仪表盘已启动: {scheme}://{config.WEB_HOST}:{config.WEB_PORT}")
+    app.run(host=config.WEB_HOST, port=config.WEB_PORT, ssl_context=ssl_context,
+            debug=False, use_reloader=False)

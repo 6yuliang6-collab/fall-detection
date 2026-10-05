@@ -19,6 +19,13 @@ runs/
 *.om
 _demo_out/
 
+# 依赖框架（单独 clone，不作为子模块提交）
+yolov5/
+
+# 汇报/演示文档（非代码）
+project_summary.html
+project_summary.pdf
+
 # Python 缓存
 __pycache__/
 *.pyc

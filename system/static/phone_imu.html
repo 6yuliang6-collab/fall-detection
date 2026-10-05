@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>手机 IMU 传感器 · 云端跌倒推理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0f1a2e;
+    color: #e8eef7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; color: #fff; }
+  .sub { font-size: 12px; color: #8fa3c0; margin-bottom: 18px; text-align: center; }
+  .card {
+    width: 100%; max-width: 480px;
+    background: #16263f;
+    border: 1px solid #2a3d5c;
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  label { display: block; font-size: 12px; color: #8fa3c0; margin-bottom: 6px; }
+  input[type=text] {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid #2a3d5c; background: #0d1a2e; color: #e8eef7;
+    font-size: 14px; margin-bottom: 12px;
+  }
+  button {
+    width: 100%; padding: 14px; border: none; border-radius: 10px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+    background: #1f6fb2; color: #fff; margin-bottom: 8px;
+  }
+  button:active { opacity: 0.8; }
+  button.secondary { background: #2a3d5c; }
+  button.stop { background: #b02a2a; }
+  .big {
+    text-align: center; font-size: 34px; font-weight: 700; color: #4fd08a;
+    margin: 8px 0;
+  }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+  .grid .cell {
+    background: #0d1a2e; border-radius: 8px; padding: 10px; text-align: center;
+  }
+  .grid .cell .v { font-size: 18px; font-weight: 600; color: #7fb4e8; }
+  .grid .cell .k { font-size: 11px; color: #8fa3c0; margin-top: 2px; }
+  .status { font-size: 13px; line-height: 1.7; }
+  .status b { color: #4fd08a; }
+  .result {
+    padding: 12px; border-radius: 10px; font-size: 15px; text-align: center;
+    background: #0d1a2e; margin-top: 6px;
+  }
+  .result.down { background: #3a1a1a; color: #ff8a8a; border: 1px solid #b02a2a; }
+  .result.normal { background: #12331f; color: #4fd08a; border: 1px solid #2e8b57; }
+  .hint { font-size: 11px; color: #6f83a3; margin-top: 8px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <h1>手机 IMU 传感器</h1>
+  <div class="sub">读取手机加速度 → 发原始窗口 → 云端随机森林推理</div>
+
+  <div class="card">
+    <label>云端推理接口地址</label>
+    <input type="text" id="url" value="https://8.219.124.194:5000/api/imu/raw">
+    <button id="btnStart" onclick="start()">① 开始采集（授权传感器）</button>
+    <button id="btnStop" class="stop" onclick="stop()" disabled>停止</button>
+    <button class="secondary" onclick="testFall()">发送一条测试跌倒窗口</button>
+  </div>
+
+  <div class="card">
+    <div class="sub" style="margin:0">当前加速度（单位 g，含重力）</div>
+    <div class="grid">
+      <div class="cell"><div class="v" id="ax">0.00</div><div class="k">Ax</div></div>
+      <div class="cell"><div class="v" id="ay">0.00</div><div class="k">Ay</div></div>
+      <div class="cell"><div class="v" id="az">0.00</div><div class="k">Az</div></div>
+    </div>
+    <div class="status" style="margin-top:12px">
+      采样数：<b id="cnt">0</b> &nbsp;|&nbsp; 已发窗口：<b id="wc">0</b>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="sub" style="margin:0">云端推理结果</div>
+    <div class="result" id="result">等待数据…</div>
+    <div class="hint">
+      提示：把手机拿在手里，模拟「跌倒」（快速下落 + 撞击）或「正常活动」（走路、坐下），
+      每 2 秒自动发一个窗口给云端推理。若网页无法读传感器（iOS 需要 HTTPS），点上面的测试按钮验证接口。
+    </div>
+  </div>
+
+<script>
+  var URL = (location.origin && location.origin.indexOf('http') === 0)
+      ? location.origin + '/api/imu/raw'
+      : 'https://8.219.124.194:5000/api/imu/raw';
+  document.getElementById('url').value = URL;
+  var buffer = [];
+  var sampling = false;
+  var windowCount = 0;
+  var timer = null;
+
+  function start() {
+    URL = document.getElementById('url').value.trim() || URL;
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      DeviceMotionEvent.requestPermission().then(function(state) {
+        if (state === 'granted') begin(); else alert('传感器授权被拒绝');
+      }).catch(function(e) { alert('授权失败：' + e); });
+    } else {
+      begin(); // Android / 桌面浏览器
+    }
+  }
+
+  function begin() {
+    sampling = true;
+    window.addEventListener('devicemotion', onMotion);
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    timer = setInterval(flush, 2000);  // 每 2 秒发一个窗口
+  }
+
+  function stop() {
+    sampling = false;
+    window.removeEventListener('devicemotion', onMotion);
+    clearInterval(timer);
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+  }
+
+  function onMotion(e) {
+    if (!sampling) return;
+    var a = e.accelerationIncludingGravity;
+    if (!a) return;
+    // m/s² -> g
+    var ax = a.x / 9.81, ay = a.y / 9.81, az = a.z / 9.81;
+    document.getElementById('ax').textContent = ax.toFixed(2);
+    document.getElementById('ay').textContent = ay.toFixed(2);
+    document.getElementById('az').textContent = az.toFixed(2);
+    buffer.push([round3(ax), round3(ay), round3(az)]);
+    document.getElementById('cnt').textContent = buffer.length;
+  }
+
+  function round3(v) { return Math.round(v * 1000) / 1000; }
+
+  function flush() {
+    if (buffer.length < 30) return;   // 太短不认（避免没采集到）
+    var w = buffer.slice();
+    buffer = [];
+    sendWindow(w);
+  }
+
+  function sendWindow(window) {
+    var payload = { device: 'phone01', fs: 50, window: window };
+    fetch(URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(r) { return r.json(); })
+      .then(function(res) { showResult(res); })
+      .catch(function(err) { showResult({ error: String(err) }); });
+  }
+
+  function showResult(res) {
+    windowCount++;
+    document.getElementById('wc').textContent = windowCount;
+    var el = document.getElementById('result');
+    if (res.error) {
+      el.className = 'result down';
+      el.textContent = '错误：' + res.error;
+      return;
+    }
+    var cls = res.class_name;
+    el.className = 'result ' + (cls === 'down' ? 'down' : 'normal');
+    el.textContent = '判定：' + (cls === 'down' ? '跌倒 (down)' : '正常 (normal)') +
+                     '  ·  置信度 ' + (res.conf != null ? res.conf.toFixed(2) : '?');
+  }
+
+  // 生成一条合成的「跌倒」窗口（站→失重→冲击→躺平），用于验证接口
+  function testFall() {
+    var N = 100, w = [];
+    for (var i = 0; i < N; i++) {
+      if (i < 10)       w.push([0, 0, 1.0]);
+      else if (i < 25)  w.push([0, 0, 0.05]);
+      else if (i < 32)  w.push([0.4, 0, -2.5]);
+      else              w.push([1.0, 0, 0]);
+    }
+    sendWindow(w);
+  }
+</script>
+</body>
+</html>

@@ -18,17 +18,27 @@ BROKER_HOST = "localhost"
 BROKER_PORT = 1883
 # 主题：边缘端把检测结果发到这个主题，云端订阅
 MQTT_TOPIC_EVENTS = "fall/detection/events"   # 视觉模态
-MQTT_TOPIC_IMU = "fall/imu/events"            # IMU 模态
+MQTT_TOPIC_IMU = "fall/imu/events"            # IMU 模态（边缘已判好的结论）
+MQTT_TOPIC_IMU_RAW = "fall/imu/raw"           # IMU 模态（原始加速度窗口，云端跑 RF 推理）
+
+# ---------- 云端 IMU 推理 ----------
+IMU_INFERENCE_ON_CLOUD = True  # True=云端订阅原始窗口并跑随机森林；False=直接收边缘结论
 
 # ---------- 多模态融合 ----------
-FUSION_ENABLED = False        # True=视觉+IMU 融合判定；False=纯视觉判定
+FUSION_ENABLED = True         # True=视觉+IMU 融合判定；False=纯视觉判定
 FUSION_RULE = "weighted"      # or / and / weighted
-FUSION_VISION_WEIGHT = 0.4    # 加权融合里视觉的权重（IMU 占 0.6，因为 IMU 更准）
+FUSION_VISION_WEIGHT = 0.9    # 加权融合里视觉的权重（视觉占 90%，IMU 占 10% 仅作兜底）
 
 # ---------- 云端后端 ----------
 WEB_HOST = "0.0.0.0"   # 绑定所有网卡：本地 http://127.0.0.1:5000，云上 http://<公网IP>:5000 都能访问
 WEB_PORT = 5000
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fall_events.db")
+
+# ---------- HTTPS（iOS 手机传感器需要 HTTPS 安全上下文）----------
+# 自签名证书（cert.pem / key.pem 放在本目录），iOS 浏览器需手动信任一次证书。
+SSL_ENABLED = True
+SSL_CERT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cert.pem")
+SSL_KEY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "key.pem")
 
 # ---------- 警报规则（核心：去抖防误报）----------
 # 连续 N 帧判为 down（中间没有 normal 打断）才触发警报
