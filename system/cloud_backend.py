@@ -76,6 +76,12 @@ _fusion_state = {
     "last_alert_ts": 0.0,                # 上次告警时间（冷却）
 }
 
+# 融合模式（运行时可通过 /api/fusion/mode 切换，无需重启）
+_fusion_config = {
+    "rule": config.FUSION_RULE,          # "weighted" / "or" / "and"
+    "w": config.FUSION_VISION_WEIGHT,    # 视觉权重（weighted 规则用）
+}
+
 
 # 纯视觉模式的去抖状态（FUSION_ENABLED=False 时用）
 _vision_state = {"consecutive_down": 0, "last_alert_ts": 0.0}
@@ -103,8 +109,8 @@ def apply_fusion_alert(device):
     import fusion
     v = _fusion_state["vision"]
     i = _fusion_state["imu"]
-    alerted, score = fusion.fuse(v, i, rule=config.FUSION_RULE,
-                                 w=config.FUSION_VISION_WEIGHT, threshold=0.5)
+    alerted, score = fusion.fuse(v, i, rule=_fusion_config["rule"],
+                                 w=_fusion_config["w"], threshold=0.5)
     with _DB_LOCK:
         if alerted:
             _fusion_state["fused_down"] += 1
@@ -296,6 +302,28 @@ def api_imu_raw():
     return jsonify({"device": device, "class_name": class_name, "conf": round(conf, 4)})
 
 
+@app.route("/api/fusion/mode", methods=["GET", "POST"])
+def api_fusion_mode():
+    """查询或切换融合模式（演示时无需重启）。
+    POST 体：{"rule": "weighted"|"or"|"and", "w": 0.6}
+    """
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        if data.get("rule") in ("weighted", "or", "and"):
+            _fusion_config["rule"] = data["rule"]
+        if "w" in data:
+            try:
+                w = float(data["w"])
+                if 0.0 <= w <= 1.0:
+                    _fusion_config["w"] = w
+            except (TypeError, ValueError):
+                pass
+        print(f"[云端] 融合模式切换为: rule={_fusion_config['rule']}, "
+              f"视觉权重={_fusion_config['w']}")
+    return jsonify({"rule": _fusion_config["rule"],
+                    "vision_weight": _fusion_config["w"]})
+
+
 @app.after_request
 def add_cors(resp):
     # 允许手机网页从任意来源调用（同一域名其实不需要，加了更稳）
@@ -317,11 +345,26 @@ def start_mqtt():
         print(f"[云端] [!] MQTT broker 连接失败（{e}），仪表盘仍可访问，但收不到边缘事件")
 
 
-if __name__ == "__main__":
+_INITIALIZED = False
+
+
+def ensure_init():
+    """建库 + 启动 MQTT（幂等）。gunicorn 导入模块时也会触发一次。"""
+    global _INITIALIZED
+    if _INITIALIZED:
+        return
     init_db()
     start_mqtt()
+    _INITIALIZED = True
 
-    # HTTPS（自签名证书，iOS 手机传感器需要安全上下文）；证书缺失则退回 HTTP
+
+# 模块导入即初始化（gunicorn `cloud_backend:app` 依赖这行）
+ensure_init()
+
+
+if __name__ == "__main__":
+    # 直接运行（开发模式）；生产用 gunicorn，见 deploy/README.md
+    ensure_init()
     ssl_context = None
     scheme = "http"
     if config.SSL_ENABLED and os.path.exists(config.SSL_CERT) and os.path.exists(config.SSL_KEY):
@@ -329,4 +372,4 @@ if __name__ == "__main__":
         scheme = "https"
     print(f"[云端] 仪表盘已启动: {scheme}://{config.WEB_HOST}:{config.WEB_PORT}")
     app.run(host=config.WEB_HOST, port=config.WEB_PORT, ssl_context=ssl_context,
-            debug=False, use_reloader=False)
+            debug=False, use_reloader=False, threaded=True)

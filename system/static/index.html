@@ -30,10 +30,26 @@
     .alert-item { padding: 10px 12px; border-left: 3px solid var(--warn); background: #2a1a1a; border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
     .alert-item .t { color: var(--muted); font-size: 12px; }
     .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+    .fusebar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 16px; border-radius: 12px; background: var(--card); margin-bottom: 20px; }
+    .fusebar .lbl { font-size: 13px; font-weight: 600; }
+    .fusebar .mode { color: #7fb4e8; font-weight: 700; }
+    .fbtns { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .fbtn { background: #334155; color: var(--text); border: 1px solid #475569; border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .fbtn:hover { background: #475569; }
+    .fbtn.active { background: #1f6fb2; border-color: #1f6fb2; color: #fff; }
   </style>
 </head>
 <body>
   <h1>🛡️ 跌倒检测监控面板</h1>
+
+  <div class="fusebar">
+    <div class="lbl">🔀 融合模式：<span class="mode" id="fusionModeLabel">加载中…</span></div>
+    <div class="fbtns">
+      <button class="fbtn" id="btnW" onclick="setFusion('weighted', 0.6)">加权 60/40</button>
+      <button class="fbtn" id="btnAnd" onclick="setFusion('and', 0.6)">AND 严格</button>
+      <button class="fbtn" id="btnOr" onclick="setFusion('or', 0.6)">OR 宽松</button>
+    </div>
+  </div>
 
   <div class="status" id="status">
     <div class="dot" id="statusDot"></div>
@@ -112,6 +128,24 @@
         console.error(e);
       }
     }
+    async function loadFusionMode() {
+      try {
+        const m = await fetch('/api/fusion/mode').then(r => r.json());
+        const pct = Math.round((m.vision_weight || 0) * 100);
+        const label = m.rule === 'and' ? 'AND 严格（两模态都判跌倒才报警）'
+                    : m.rule === 'or' ? 'OR 宽松（任一判跌倒即报警）'
+                    : `加权（视觉 ${pct}% / IMU ${100-pct}%）`;
+        document.getElementById('fusionModeLabel').textContent = label;
+        ['btnW', 'btnAnd', 'btnOr'].forEach(id => document.getElementById(id).classList.remove('active'));
+        const map = { weighted: 'btnW', and: 'btnAnd', or: 'btnOr' };
+        if (map[m.rule]) document.getElementById(map[m.rule]).classList.add('active');
+      } catch (e) {}
+    }
+    async function setFusion(rule, w) {
+      await fetch('/api/fusion/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule, w }) });
+      loadFusionMode();
+    }
+    loadFusionMode();
     refresh();
     setInterval(refresh, 1500);
   </script>

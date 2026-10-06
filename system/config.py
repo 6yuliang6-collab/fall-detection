@@ -27,7 +27,7 @@ IMU_INFERENCE_ON_CLOUD = True  # True=云端订阅原始窗口并跑随机森林
 # ---------- 多模态融合 ----------
 FUSION_ENABLED = True         # True=视觉+IMU 融合判定；False=纯视觉判定
 FUSION_RULE = "weighted"      # or / and / weighted
-FUSION_VISION_WEIGHT = 0.9    # 加权融合里视觉的权重（视觉占 90%，IMU 占 10% 仅作兜底）
+FUSION_VISION_WEIGHT = 0.6    # 加权融合里视觉的权重（视觉 60%，IMU 40%）
 
 # ---------- 云端后端 ----------
 WEB_HOST = "0.0.0.0"   # 绑定所有网卡：本地 http://127.0.0.1:5000，云上 http://<公网IP>:5000 都能访问
